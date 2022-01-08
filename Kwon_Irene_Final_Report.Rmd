@@ -1,0 +1,432 @@
+---
+title: "Individual- and Contextual-Level Predictors of Sexism"
+author: "Irene Kwon"
+subtitle: "STAT301-3: Data Science III"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(warning = FALSE, message = FALSE, comment = FALSE, echo = FALSE)
+
+library(tidyverse)
+library(kableExtra)
+library(skimr)
+library(glmnet)
+library(glmnetUtils)
+library(corrplot)
+```
+
+
+## I. Introduction 
+
+**NOTE: the Introduction and Data Overview section is largely from the EDA Report.**
+
+Despite the contemporary waves of feminism and women's rights movements, sexism and gender-based oppression still persist in many parts of the world. For example, even in the modern days, more than one in four Africans see wife-beating as justifiable (Afrobarometer Survey: https://afrobarometer.org/press/more-one-four-africans-see-wife-beating-justifiable-afrobarometer-survey-finds), while more than 90% of the global population – including both men and women – is somehow biased against women (UNDP Gender Social Norms Index: https://www.undp.org/content/undp/en/home/news-centre/news/2020/Gender_Social_Norms_Index_2020.html). Yes, it is heartbreaking just to read about persistent misogyny - but to solve the problem, we have to begin by facing it directly. Therefore, for this project, I examine the following questions: 
+
+*	On average, how sexist/misogynist are people around the world? 
+
+*	What individual-level factors are associated with a person's sexist/misogynistic attitudes? 
+
+*	Are there meaningful differences across countries and culture in terms of sexism? Does context matter? If so, how much does it matter? 
+
+Therefore, my questions are largely descriptive and predictive. It is descriptive because I aim to present the snapshot of individuals’ attitudes toward women and girls (i.e., sexism) around the world. At the same time, the questions are predictive in that I aim to identify the most important factors to predict a person’s sexism.
+
+In doing so, I examine both contextual and individual factors. Intuitively, we can expect that individual factors, such as (but not limited to) one’s very own gender, conservatism, religious views, or education attainment can be highly associated with one’s sexism. Simultaneously, contextual factors can matter as well; for example, culturally conservative and/or religious countries may exhibit, on average, higher degrees of sexism compared to secular and/or more liberal countries.
+
+Note that while the results can potentially be interpreted in inferential ways (i.e., contexts matter in determining a person’s attitudes towards women – and it is highly likely that contextual factors, such as the socialization environment an individual was raised in, influenced and ultimately shaped his attitudes towards women), in this project, I do not aim at establishing a causal relationship (e.g., whether something causes a person to be misogynist).
+
+<br><br>
+
+## II. Overview of the Data 
+
+I use the World Values Survey (WVS) to ansewr the questions mentioned above.
+
+### 1. Data Introduction
+
+The WVS is a worldwide investigation of sociocultural and political change, and focus mainly on values of respondents – e.g., mainly on political, gender, and economic attitudes (Inglehart et al. 2004). It covers countries from all parts of the world – from Asia to Africa. With the same questionnaire (translated in different languages), the Survey enables cross-country, over-time comparisons. The questionnaire includes a wide range of items asking the basic demographics, and those about values regarding gender (broadly construed), family, religion, and politics. Therefore, to identify which factors - both individual and country level - predict a person’s attitudes toward gender issues, the WVS will provide very insightful data.
+
+While the WVS has had multiple rounds (i.e., waves) so far, starting from 1981, I limit the scope of analysis to the 6th wave only. The 6th wave is the most recent wave completed as of now, with the 7th wave being done right now. As I state below, this is because each wave contains slightly different questions especially those on sexism, making it hard to construct a variable that enables across-time comparisons.
+
+Data citation: Inglehart, R., C. Haerpfer, A. Moreno, C. Welzel, K. Kizilova, J. Diez-Medrano, M. Lagos, P. Norris, E. Ponarin & B. Puranen et al. (eds.). 2014. World Values Survey: All Rounds - Country-Pooled Datafile Version: http://www.worldvaluessurvey.org/WVSDocumentationWVL.jsp. Madrid: JD Systems Institute.
+
+<br>
+
+### 2. Missingness Problem 
+
+Since this is a survey data, people can simply choose not to answer, or respond that they do not know - and indeed, there were a bunch of "don't know"s and "no answer"s. In the original dataset, these responses were coded to have negative values (e.g., -1 for don't know, -2 for no answer, -4 for not asked in the survey, etc.). To facilitate the data analysis, I just coded the values less than 0 coded as missing (`NA`). 
+
+While I do acknowledge that simply choosing not to answer to the given question(s), or responding with "don't know" may substantively mean something, I choose to replace the missing values with multiple imputation following Van Buuren (https://stefvanbuuren.name/fimd/). I used the method `cart` (classification and regression trees). CART methods have properties that make them attractive for imputation: they are robust against outliers, can deal with multicollinearity and skewed distributions, and are flexible enough to fit interactions and nonlinear relations. Furthermore, many aspects of model fitting have been automated, so there is “little tuning needed by the imputer” (Burgette and Reiter 2010). I created only one multiple imputation set so that I do not have to average the model results at the end.
+
+```{r missing-value-density-plot, message=FALSE, warning=FALSE}
+knitr::include_graphics("images/densityplot.png")
+```
+
+In general, the red lines for each variable have a similar distribution with the blue lines, meaning that the imputed values have similar distributions with the observed values. By implication, it means that the imputed values do not deviate much from the observed distribution. 
+
+<br>
+
+### 3. Data Split 
+
+Per protocol, I split the data set into three parts, and use different data sets for the EDA, training the model and validating/testing the model. I assign 20% of the entire dataset for the EDA, 60% for model building, and the remaining 20% for testing the candidate models.
+
+One thing to note about the WVS data set is the structure of the data set. Since the same survey is conducted in different countries, and since the survey concerns individuals, the data set has a hierarchical (or nested) structure. This can be an issue when splitting the data into three different sets; we do not want covariate imbalance - e.g., we do not want observations from the U.S. to be mostly in the training set while we have only couple observations from Thailand in the training set.
+
+```{r data-split-distribution, message=FALSE, warning=FALSE}
+knitr::include_graphics("pictures/distributions.png")
+```
+
+Theoretically, random split should take care of covariate imbalance (since all the individuals have the same probability of being assigned to one group over another). According to the distribution plots above, it seems that random split did work - the overall distribution looks similar. Therefore, I proceed with using the randomly split datasets. 
+
+<br>
+
+### 4. Data Prep 
+
+To improve the prediction performance of the models, I scaled the datasets so that the numeric variables would have the same standard deviation. The scaled dataset looks as follows (this dataset excludes the EDA portion of the dataset, which I did not scale): 
+
+```{r skim-the-data, message=FALSE, warning=FALSE}
+traintest2 <- read_rds("data/traintest2.rds")
+skim(traintest2)
+```
+
+<br>
+
+Note that this dataset contains the multiply imputed values for missing entries (hence no missingness). While scaling the dataset does not change the distribution of the variables, it allows us to have a more comparable model results, which is especially useful in interpreting the regression results (e.g., with the models run on the scaled dataset, we can directly compare the size of the coefficients). Lastly, I also one-hot encoded the factor variables (the regional indicators). 
+
+<br><br>
+
+### 5. Outcome Variable 
+
+To create an index of how much sexist a person is, I re-code some relevant variables and combined them to create a single numerical score such that **higher values indicate higher sexism**. Specifically, I combined the responses to the following six questions:
+
+(1) When jobs are scarce, whether men should have more right to a job than women.
+
+(2) How much respondents agree or disagree with the given statement: men make better political leaders than women do.
+
+(3) How much respondents agree or disagree with the given statement: men make better business executives than women do.
+
+(4) How much respondents agree or disagree with the given statement: whether university education is more important for a boy than for a girl.
+
+(5) How much respondents agree or disagree with the given statement: if a woman earns more money than her husband, it is almost certain to cause a problem.
+
+(6) Whether the following statement is an essential characteristic of democracy: women have the same right as men.
+
+These six questions were combined with equal weights. The distribution of the response variable, `sexism`, is shown in the histogram below: 
+
+```{r sexism-distribution, message=FALSE, warning=FALSE}
+train <- read_rds("data/train.rds")
+
+train %>%
+  ggplot(aes(x = sexism)) + 
+  geom_histogram(aes(y = ..density..), binwidth = 1) + 
+  geom_vline(aes(xintercept = mean(sexism)), 
+             color = "red", linetype = "dashed", size = 1) + 
+  geom_density(alpha = .2, fill = "#1A5276") + 
+  labs(
+    title = "Distribution of Sexism", 
+    subtitle = "Higher values indicate higher sexism.", 
+    caption = "World Value Survey, Wave 6"
+  )
+ 
+```
+
+As can be seen from the histogram above, the response variable ranges from the minimum value of 6 to the maximum value of 28. The mean and the median values are quite close to each other, with the mean being 14 and the median being 14.22. While we see a "thick" middle - most people are located somewhere around or below the middle - the distribution has a long right-tail. 
+
+<br><br>
+
+### EDA Summary 
+
+To recap some interesting findings from the EDA report, I present three key plots from the EDA report.
+
+```{r sexism-map}
+knitr::include_graphics("images/sexism.png")
+```
+
+
+#### 1. Correlation Heatmap 
+
+First, I look at the correlation between one’s personal beliefs: authoritarian personality traits, social conservatism, traditional values, and religiosity. These are all the factors that one can assume to have some association with a person’s sexism.
+
+```{r}
+eda <- read_rds("data/eda.rds")
+
+eda %>% 
+  select(divorcejustifiable, traditionimportant, parentsproudlifegoal, 
+         adventurerisk, behaveproperlyimpt, abortionjustifiable, 
+         housewifefulfilling, respectforauthority, respectforelder, 
+         obedienceimportant, boss30yrold, 
+         just_sexbeforemarriage, just_homosexuality, neighbor_unmarriedcouple,
+         neighbor_homosexual, 
+         religion_important, religiousauthoritylaw, godimportant, believeinhell, sexism) %>%
+  na.omit() %>%
+  cor() %>% 
+  corrplot(method = "color", order = "AOE")
+```
+
+Please note that I did not re-code these variables such that high values indicate placing more importance to tradition and/or religion. That is, negative numerical correlations can actually mean positive substantive correlation.
+
+From the correlation heatmap above, we can see a chunk of stronger correlation between divorcejustifiable, just_homosexuality, just_sexbeforemarriage, abortionjustifiable, and religion_important. These variables have moderate correlation with sexism as well. It means that those who have conservative attitudes towards sex and sexuality are also likely to hold more sexist views.
+
+<br>
+
+#### 2. Regional differences in distribution 
+
+I have found that there are indeed regional differences in distribution. However, the interpretation should be more nuanced. Rather than region itself making people more or less sexist, the differences may be due to regional differences in income, education, cultures, social and political institutions, historical experiences, etc. 
+
+```{r sexism-regional-differences, message=FALSE, warning=FALSE}
+eda %>% 
+  filter(!is.na(sexism)) %>% 
+  ggplot(aes(x = fct_reorder(sub_region, sexism, .desc = TRUE), 
+             y = sexism, fill = sub_region)) + 
+  geom_boxplot() + 
+  theme(axis.text.x = element_text(angle = 45)) + 
+  labs(
+    x = "Region", 
+    y = "Sexism", 
+    title = "Sexist Attitudes by Region", 
+    subtitle = "Higher values for sexism indicate higher sexism."
+  )
+
+```
+
+<br>
+
+#### 3. Religiosity differences (by sex)
+
+Although I myself am not religious, as a social scientist I am very familiar with the argument that religion as an institution reinforces sexism. The General Social Survey even includes a question asking whether respondents think religion is an obstacle to achieving gender equality (about 27% of the people agreed to this statement). Against this backdrop, I explored the relationship between religiosity and sexism. 
+
+```{r sexism-religiosity-differences, message=FALSE, warning=FALSE}
+eda %>% 
+  filter(!is.na(religion_important)) %>% 
+  filter(!is.na(sexism)) %>% 
+  filter(!is.na(sex)) %>%
+  mutate(gender = ifelse(sex == 1, "male", "female")) %>% 
+  ggplot(aes(x = as.factor(religion_important), y = sexism, fill = as.factor(religion_important))) + 
+  geom_boxplot() +
+  facet_wrap(~gender) + 
+  scale_fill_discrete(
+    name = "Importance of religion in life", 
+    labels = c("Very important", "Rather important", 
+               "Not very important", "Not at all important")
+  ) + 
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 16)
+  ) +
+  labs(
+    x = "Importance of Religion", 
+    y = "sexism", 
+    title = "Distribution of Sexism by Religiosity and by Sex"
+  )
+```
+
+The more important role religion plays in a person’s life, the more sexist he/she is (on average). The difference is even larger for male. That is, if a man feels that religion is very important in his life, he is significantly likely to be more sexist that a man who believes that religion is not at all important in his life.
+
+
+<br><br>
+
+## III. Model Building 
+
+As I stated above, since our outcome variable (the sexism index) has a numeric scale, it is a regression problem. I am also interested in finding out which models and variables are most successful in predicting the outcome variable (i.e., one’s sexist attitudes against women). Therefore, I try out different regression and machine-learning models: the simple ordinary least squares (OLS) regression, Lasso and ridge regressions, random forests and neural networks. If applicable (i.e., if there are tuning parameters to train), I use 10-fold cross-validation. 
+
+### 1. OLS 
+
+First, I begin with the simple (yet powerful) model - the OLS regressions. Through our previous labs and Kaggle competition assignment, I learned that this simple algorithm actually performs relatively well compared with other more sophisticated, complex models. I try out four different OLS model specifications: (1) all-inclusive model, (2) religion/religiosity model, (3) demographics model, and (4) tradition/conservatism model. 
+
+* Model 1: All-inclusive model 
+
+I begin with a kitchen-sink, all-inclusive model first. Here, all the variables in the dataset are included in the regression model. It is worth noting that while multicollinearity may affect the coefficients. However, if our primary purpose is for prediction, then we do not have to worry much about this problem.  
+
+* Model 2: Religion/religiosity model
+
+Second, we have seen from the previous EDA report that religion and religiosity are associated with individuals' sexism. Therefore, I try predicting one's sexism with religion- and religiosity-related variables.
+
+* Model 3: Demographic model
+
+In the EDA report, we have also discovered that demographic factors can be a potential predictor for sexist attitudes. Therefore, I also try running models with demographic characters to predict one's sexism. 
+
+* Model 4: Tradition/conservatism model 
+
+Lastly, traditionalism and conservatism can also make one sexist though subconsciously (my dad and my grandmother are great examples). I sorted out some of the variables in the WVS to measure respondents' traditional and conservative values and attitudes. This time, I try out predicting one's sexism with these variables. 
+
+Following are graphical presentations of the coefficients obtained from OLS regressions. While I tried out seven different model specifications, to save space, I just display two models that could be of substantive interest. The first plot shows the coefficients of variables associated with individuals' religiosity and religious fundamentalism. The second plot shows the coefficients of the variables associated with individuals' traditionalism and conservatism. 
+
+The first thing to note is that since I run the regressions on the scaled version of the dataset, the coefficients should be interpreted accordingly - that is, the unit of interpretation is standard deviations rather than the raw units. Second, the statistical significance (i.e., the range of the whiskers not including 0) does not mean "causal" influence. It merely means that controlling for the variables included in the model, the variable of interest is indeed associated with the increase (or decrease) in the outcome variable. Most of the factors turn out to be statistically significant (i.e., statistically different from zero).
+
+```{r}
+knitr::include_graphics("OLS/ols_mod3.png")
+knitr::include_graphics("OLS/ols_mod7.png")
+```
+
+Remember that the higher the values of the dependent variable (i.e., sexism), the more sexist an individual is. From the first plot, we can see that variables associated with religiosity and religious fundamentalism have coefficients statistically different from zero. Notably, we can see that the coefficients for `religion_important`, `sciencevsreligion` and `onlyacceptablereligion` are all negative; this means that the more important religion is to a respondent's life, the more (s)he is likely to be more sexist. Likewise, the more strongly one agrees to the statement that Whenever science and religion conflict, religion is always right, the more sexist one is. The more one believes that the only acceptable religion is his own religion, the more he is likely to be sexist as well. 
+
+From the second plot, we can also see that pretty much almost all the variables are statistically significant (their confidence intervals do not include 0). For example, those who firmly believe that a suitably qualified thirty-year old boss is completely unacceptabe are more likley to be sexist. Additionally, the more (s)he believe that sex before marriage and/or homosexuality is justifiable, the more sexist (s)he is - this is consistent with what we have seen in the EDA; the more traditional and conservative (s)he is, the more sexist (s)he is. 
+
+<br><br>
+
+### 2. Regularization: Lasso and Ridge 
+
+Next, although I tried to sort out relevant variables from the huge WVS dataset for this project, I still have more than 50 variables. Therefore, I tried out lasso and ridge regressions for regularization. These regressions have penalty parameters to shrink the coefficients, so that ultimately the dimensions can be reduced for better predictions. To set the values of lambdas, I run 10-fold cross-validation for both Lasso and ridge regressions. The plots below display 300 different log lambda values and the corresponding estimated MSE values using 10-fold cross-validation.  
+
+1. Ridge regression: 
+
+```{r ridge-lambda-MSE, message=FALSE, warning=FALSE}
+knitr::include_graphics("Regularization/plot_ridge.png")
+
+```
+
+The lambda value that minimizes the test MSE is 0.04253658. The lambda value which is one standard error away from this value (which is supposed to guard against overfitting) is 0.925881. 
+
+2. Lasso regression: 
+
+```{r lasso-lambda-MSE, message=FALSE, warning=FALSE}
+knitr::include_graphics("Regularization/plot_lasso.png")
+
+```
+
+The lambda value that minimizes the test MSE is 0.00143612. The lambda value which is one standard error away from this value (which is supposed to guard against overfitting) is 0.04253658.
+
+While both ridge and Lasso regression models have penalty parameters for regularization, the key difference between the two algorithms is that Lasso regression actually shrinks some of the coefficients to zero. The following table presents which coefficients are "zeroed out" and which are not. 
+
+```{r lasso-coefficients, message=FALSE, warning=FALSE}
+## Comparison of the Models
+test <- read_rds("data/test.rds")
+
+ridge_lambda_min <- 0.0425365773275039
+ridge_lambda_1se <- 0.925881025397394
+
+lasso_lambda_min <- 0.00143611968599908
+lasso_lambda_1se <- 0.0425365773275039
+
+sexism_glmnet <- tibble(train = train %>% list(),
+                         test  = test %>% list()) %>%
+  mutate(ridge_min = map(train, ~ glmnet(sexism ~ ., data = .x,
+                                         alpha = 0, lambda = ridge_lambda_min)),
+         ridge_1se = map(train, ~ glmnet(sexism ~ ., data = .x,
+                                         alpha = 0, lambda = ridge_lambda_1se)),
+         lasso_min = map(train, ~ glmnet(sexism ~ ., data = .x,
+                                         alpha = 1, lambda = lasso_lambda_min)),
+         lasso_1se = map(train, ~ glmnet(sexism ~ ., data = .x,
+                                         alpha = 1, lambda = lasso_lambda_1se))) %>% 
+  pivot_longer(cols = c(-test, -train), names_to = "method", values_to = "fit")
+
+# Inspect/compare model coefficients 
+sexism_glmnet %>% 
+  pluck("fit") %>% 
+  map( ~ coef(.x) %>% 
+         as.matrix() %>% 
+         as.data.frame() %>% 
+         rownames_to_column("name")) %>%
+  reduce(full_join, by = "name") %>% 
+  mutate_if(is.double, ~ if_else(. == 0, NA_real_, .)) %>% 
+  rename(ridge_min = s0.x,
+         ridge_1se = s0.y,
+         lasso_min = s0.x.x,
+         lasso_1se = s0.y.y) %>% 
+  knitr::kable(digits = 3)
+```
+
+<br>
+
+### 3. Random Forest 
+
+Next, I try out random forests. Again, using 10-fold cross-validation, I train the parameters (mtry and node size). Running a random forest model takes enormous amount of time and sometimes crashed my computer, so instead of using all the observations (n = 53,800) in the training set, I used a random sample of the training set – 10% of the training set, with 5,380 observations – to train the parameters. Before running the random forest models, I checked and confirmed that the random sample of the training set is representative of the training set in general. 
+
+```{r, message=FALSE, warning=FALSE}
+rf_10fold <- read_rds("RandomForest/randomforest_10.rds")
+
+rf_10fold  %>% 
+  group_by(mtry) %>% 
+  summarize(test_mse = mean(fold_mse)) %>%
+  ggplot(aes(x = mtry, y = test_mse)) +
+  geom_line() +
+  geom_point() 
+```
+
+While we see that there is a diminishing return over after `mtry = 10`, according to the 10-fold cross-validation results, the optimal `mtry` value turns out to be 24. 
+
+```{r}
+rf_10fold24 <- read_rds("RandomForest/randomforest_nodes.rds")
+
+rf_10fold24 %>% 
+  group_by(min_nsize) %>% 
+  summarize(test_mse = mean(fold_mse)) %>% 
+  ggplot(aes(x = min_nsize, y = test_mse)) + 
+  geom_line() + 
+  geom_point()
+```
+
+Also, per 10-fold cross-validation results, the optimal node size seems to be 25. Therefore, I set the `mtry` and `node` values to 24 and 25, respectively. 
+
+Interpreting the results of the random forests can be a little tricky. However, one key question of interest would be "what is the most important factor explaining the variation in the dependent/response variable?" The following plot displays the variable importance index obtained from the random forests algorithm we ran above, with the `mtry` value of 24.  
+
+```{r}
+# image file to import: vip_wvs_sexism (variable importance measure)
+knitr::include_graphics("images/vip_wvs_sexism.png")
+```
+
+We can see that as expected, one's traditionalism/conservatism and religiosity definitely play an important role in predicting his or her sexist beliefs. What is unexpected is one's satisfaction in life - this is definitely something we could delve deeper into! Probably it would be the case that larger satisfaction in life is associated with some other factors. For instance, educational achievement, income level, age, conservatism, religiosity and gender - all these factors can (both independently and interactively) affect one's satisfaction in life, which in tern predict his/her latent sexism. 
+
+<br><br>
+
+### 4. Neural Network 
+
+The final algorithms I tried out neural networks. As with random forests, this algorithm is supposed to be highly flexible and able to detect the unobserved interactions between the variables included in the model. To examine what role the node size and the number of layers play, I try out three different specifications of neural networks: (1) a neural network with three hidden layers, with each layer having 64 nodes, (2) a neural network with three hidden layers, with each layer having 32 nodes, and (3) a neural network with two hidden layers, with each layer having 64 nodes. All three models have 100 epochs. Theoretically, neural networks with more layers and more nodes should be able to have more flexibility though at the cost of overfitting. 
+
+1. Three hidden layers with `node = 64`
+
+```{r}
+knitr::include_graphics("images/neuralnet1.png")
+```
+
+<br>
+
+2. Three hidden layers with `node = 32`
+
+```{r}
+knitr::include_graphics("images/neuralnet2.png")
+```
+
+<br>
+
+3. Two hidden layers with `node = 64`
+
+```{r}
+knitr::include_graphics("images/neuralnet3.png")
+```
+
+In general, the three plots look very much alike. The slight difference would be that the "slopes" of the graphs are somewhat different. With higher node values, the slopes are steeper; the MSE/loss drops more quickly. With larger node values (`node=64`), the end MSE/loss is lower too. 
+
+
+<br><br>
+
+## IV. Candidate Model Comparison 
+
+As the final step, I now compare the candidate models whose parameters are chosen from the cross-validation steps above. This time, I use the test set - the remaining 20% of the entire data set aside as the validation set from the very beginning. The goal here is to see which model performs the best in predicting the outcome variable (i.e., individuals' sexism). 
+
+```{r}
+model_mse <- tibble(
+  model = c("OLS1", "OLS2", "OLS3", "OLS4", "OLS5", "OLS6", "OLS7", 
+            "Lasso min", "Lasso 1se", "Ridge min", "Ridge 1se", 
+            "Random forest", "Neural Network 1", "Neural Network 2", 
+            "Neural Network 3"), 
+  testMSE = c(13.732, 17.744, 16.720, 19.131, 16.771, 16.920, 15.716, 
+               13.731, 13.801, 13.732, 13.795, 13.761, 15.97038, 14.09857, 15.21191)
+)
+
+knitr::kable(model_mse %>% 
+  arrange(testMSE))
+```
+
+<br><br>
+
+## V. Conclusion and Next Steps 
+
+In sum, we can see that the regularization methods (Lasso and ridge regressions) did relatively well; also, the all-inclusive OLS regression model also did impressively well. While random forest had high predictive power, neural network did not perform that well. Among the neural networks, the second one (with three hidden layers where each layer has 32 nodes) shows the best predictive performance. Given that the variance of the dependent variable in the test set is 20.16585, the test mean squared errors from some models are not extremely bad. 
+
+The analysis above provides empirical evidence of  the "Keep It Simple" principle - the OLS regression, which is the simplest model of all, proved to be one of the best predictive models. 
+
+While I tried to include regional index variables in the model to capture the context-specific effects on one's sexist attitudes, there may be some other models I could use to improve the analysis. For example, given that this is a repeated cross-sectional dataset with a nested structure (i.e., individuals are nested in a geographic unit, such as within a country or a continent. Therefore, it would be reasonable to try out some fixed-effects models (such as country-fixed, continent-fixed, and subregion-fixed effects models). It would also be interesting to see whether these regional indicators have an interaction effect with other substantive variables, such as religiosity: e.g., whether religious Americans are different from religious Asians.
+
+Last but not least, per Professor Schauer's recommendation, I also plan to explore BART (Bayesian additive regression trees) in the near future, and examine whether this Bayesian method has better predictive power than other models. I could not include the analysis from BART in this report due to the time constraint, but it would be interesting to see whether Bayesian and frequentist statistical models yield different results - and if not, to examine how similarly the two models perform. 
+
