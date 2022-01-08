@@ -3,4 +3,9 @@ This repository stores a project to reveal predictors of sexism around the world
 
 ** NOTE: The caption under the map plot says "the brigher a coutnry is colored, the less sexist its people are on average." This should be the reverse: "the darker a country is colored, the less sexist its people are on average."
 
-To view the html file on brower, please use this url: https://htmlpreview.github.io/?https://github.com/kireneyj/WVS-sexism-ML/blob/main/Kwon_Irene_Executive_Summary.html
+To view the html file on brower, please use this url: https://htmlpreview.github.io/
+* View the executive summary: https://htmlpreview.github.io/?https://github.com/kireneyj/WVS-sexism-ML/blob/main/Kwon_Irene_Executive_Summary.html
+* View exploratory data analysis (EDA): https://htmlpreview.github.io/?https://github.com/kireneyj/WVS-sexism-ML/blob/main/Kwon_Irene_EDA.html
+* View final report: https://github.com/kireneyj/WVS-sexism-ML/blob/main/Kwon_Irene_Final_Report.html
+
+Feel free to use the Rmd file for a template! 
